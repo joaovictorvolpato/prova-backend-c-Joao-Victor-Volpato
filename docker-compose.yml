@@ -1,0 +1,63 @@
+services:
+  api:
+    build: .
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-drone}:${POSTGRES_PASSWORD:-drone}@postgres:5432/${POSTGRES_DB:-drone}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      MODELS_MANIFEST: /app/models/manifest.json
+      IMAGES_ROOT: /app/data/images
+    volumes:
+      # As imagens processadas ficam fora da imagem Docker; em produção este
+      # ponto é o S3, via microsserviço de storage.
+      - ./data/images:/app/data/images
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-drone}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-drone}
+      POSTGRES_DB: ${POSTGRES_DB:-drone}
+    volumes:
+      # A partir do Postgres 18 a imagem oficial pede o mount em
+      # /var/lib/postgresql, e não em .../data: os dados passam a ficar em um
+      # subdiretório por versão, o que viabiliza pg_upgrade --link.
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      # É este healthcheck que a API espera antes de subir.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-drone} -d ${POSTGRES_DB:-drone}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

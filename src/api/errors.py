@@ -15,6 +15,7 @@ from src.domain.exceptions import (
     InvalidMissionError,
     MissionNotFoundError,
     ModelVersionNotFoundError,
+    PredictionInProgressError,
     PredictionNotFoundError,
 )
 
@@ -23,6 +24,7 @@ _STATUS_BY_ERROR: dict[type[Exception], int] = {
     DuplicatedMissionError: status.HTTP_409_CONFLICT,
     InvalidMissionError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     PredictionNotFoundError: status.HTTP_404_NOT_FOUND,
+    PredictionInProgressError: status.HTTP_409_CONFLICT,
     ImageNotFoundError: status.HTTP_404_NOT_FOUND,
     ModelVersionNotFoundError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidImageError: status.HTTP_422_UNPROCESSABLE_CONTENT,

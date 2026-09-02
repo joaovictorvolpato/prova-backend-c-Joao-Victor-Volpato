@@ -9,7 +9,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "Drone Missions API"
-    database_url: str = "data/missions.db"
+    log_level: str = "INFO"
+    database_url: str = "sqlite:///data/missions.db"
+    database_connect_attempts: int = 30
+    database_connect_delay_seconds: float = 1.0
+
+    # Cache distribuído; vazio faz a API rodar sem Redis
+    redis_url: str | None = None
+    idempotency_ttl_seconds: int = 300
 
     # Modelos de IA e origem das imagens processadas
     models_manifest: str = "models/manifest.json"

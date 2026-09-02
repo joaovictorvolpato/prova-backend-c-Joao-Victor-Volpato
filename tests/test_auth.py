@@ -58,4 +58,18 @@ def test_healthcheck_e_publico(client):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "database": "up"}
+    assert response.json() == {"status": "ok", "database": "up", "cache": "disabled"}
+
+
+def test_healthcheck_responde_503_com_banco_fora(client, monkeypatch):
+    from src.repository.database import Database
+
+    async def falha(self) -> None:
+        raise RuntimeError("banco fora")
+
+    monkeypatch.setattr(Database, "ping", falha)
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["database"] == "down"

@@ -1,0 +1,11 @@
+.git
+.venv
+data
+tests
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+.env
+README.md
+Prova*.pdf
