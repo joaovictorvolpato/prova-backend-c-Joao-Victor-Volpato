@@ -67,10 +67,10 @@ def test_status_em_texto_e_convertido_para_o_enum():
 def test_status_desconhecido_e_rejeitado_pelo_dominio():
     import pytest
 
-    from src.domain.exceptions import InvalidMissionError
     from src.domain.mission import Mission
 
     mission = Mission.create(name="Talhão 12", drone_model="DJI Mavic 3M")
 
-    with pytest.raises(InvalidMissionError):
+    # A conversão para o enum recusa o valor; pela API o Pydantic já barra antes.
+    with pytest.raises(ValueError):
         mission.with_changes(status="voando")

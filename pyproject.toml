@@ -10,6 +10,9 @@ dependencies = [
     "pydantic-settings>=2.6",
     "aiosqlite>=0.20",
     "pyjwt>=2.9",
+    "onnxruntime>=1.29.0",
+    "pillow>=12.3.0",
+    "numpy>=2.5.2",
 ]
 
 [dependency-groups]

@@ -12,8 +12,34 @@ from src.repository.database import Database
 
 
 @pytest.fixture
-def settings(tmp_path) -> Settings:
-    return Settings(database_url=str(tmp_path / "test.db"), jwt_secret="test-secret")
+def images_root(tmp_path):
+    root = tmp_path / "images"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def settings(tmp_path, images_root) -> Settings:
+    return Settings(
+        database_url=str(tmp_path / "test.db"),
+        jwt_secret="test-secret",
+        images_root=str(images_root),
+        # Manifesto real: o registry é memorizado, então o modelo carrega uma
+        # única vez para toda a suíte.
+        models_manifest="models/manifest.json",
+    )
+
+
+@pytest.fixture
+def image_key(images_root) -> str:
+    """Grava uma imagem pequena e devolve a chave dela no storage."""
+    from PIL import Image
+
+    key = "missao-12/frame-0001.png"
+    path = images_root / key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), color=(120, 140, 90)).save(path)
+    return key
 
 
 @pytest.fixture

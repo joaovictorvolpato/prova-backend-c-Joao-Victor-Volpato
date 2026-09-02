@@ -81,8 +81,6 @@ class Mission:
         """
         raw_status = changes.get("status")
         if raw_status is not None:
-            # Converte antes de comparar: o status pode chegar como string,
-            # e assim a entidade guarda sempre o enum.
             new_status = MissionStatus(raw_status)
             changes = {**changes, "status": new_status}
             if new_status != self.status:

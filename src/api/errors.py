@@ -9,14 +9,24 @@ from fastapi.responses import JSONResponse
 
 from src.domain.exceptions import (
     DuplicatedMissionError,
+    ImageNotFoundError,
+    InferenceError,
+    InvalidImageError,
     InvalidMissionError,
     MissionNotFoundError,
+    ModelVersionNotFoundError,
+    PredictionNotFoundError,
 )
 
 _STATUS_BY_ERROR: dict[type[Exception], int] = {
     MissionNotFoundError: status.HTTP_404_NOT_FOUND,
     DuplicatedMissionError: status.HTTP_409_CONFLICT,
     InvalidMissionError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    PredictionNotFoundError: status.HTTP_404_NOT_FOUND,
+    ImageNotFoundError: status.HTTP_404_NOT_FOUND,
+    ModelVersionNotFoundError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    InvalidImageError: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    InferenceError: status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
 
 

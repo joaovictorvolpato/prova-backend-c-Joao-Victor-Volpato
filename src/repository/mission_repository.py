@@ -38,7 +38,6 @@ class MissionRepository(AbstractRepository[Mission], IMissionRepository):
             "id": entity.id,
             "name": entity.name,
             "status": entity.status.value,
-            # ISO 8601 mantém a ordenação lexicográfica igual à cronológica.
             "created_at": entity.created_at.isoformat(),
             "drone_model": entity.drone_model,
             "image_count": entity.image_count,
@@ -60,4 +59,3 @@ class MissionRepository(AbstractRepository[Mission], IMissionRepository):
         query = f"SELECT {', '.join(self.columns)} FROM {self.table} WHERE name = ?"
         row = await self._db.fetch_one(query, (name,))
         return self.to_domain(row) if row else None
-
