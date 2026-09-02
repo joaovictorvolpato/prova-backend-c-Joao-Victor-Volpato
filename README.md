@@ -323,3 +323,18 @@ que o cliente manda serve só para filtrar dentro do que já é dele.
 4. Responder 404, não 403.** Para recurso de outro cliente, "não encontrado" evita
 confirmar que o id existe. `403` já é informação para quem está enumerando ids.
 
+
+---
+
+## Uso de IA
+
+O código deste repositório foi escrito por IA (Claude Opus 5, via Claude Code), sob minha
+orientação, revisão e modificação. As respostas escritas — as questões teóricas das Partes 1,
+4 e 5 — foram escritas integralmente por mim.
+
+**O que a IA fez.** A implementação: estrutura em camadas, rotas, services, repositories,
+domínio, integração com o ONNX Runtime, testes, `Dockerfile` e `docker-compose.yml`.
+
+**O que eu fiz.** Defini a arquitetura e as decisões de design, revisei cada entrega e pedi
+as mudanças que julguei necessárias. Entre as intervenções que mudaram o resultado:
+
