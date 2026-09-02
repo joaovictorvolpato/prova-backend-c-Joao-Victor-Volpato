@@ -167,6 +167,11 @@ A inferência roda em `asyncio.to_thread`, porque é CPU-bound e travaria o even
 rodasse direto na rota. A solução real é tirar o
 processamento da API e passá-lo para um worker consumindo fila — que é exatamente o desenho
 descrito nas respostas das Questões 3 e 4.
+<<<<<<< HEAD
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> 8b537d7 (docs adding part 5 answers)
 
 ---
 
@@ -251,3 +256,70 @@ já existe.
 No código atual, isso é uma implementação nova de `IPredictionService`: a rota, os schemas
 e o repositório de histórico continuam iguais, porque a interface não muda. O que muda é
 quem executa a inferência, e quando.
+
+
+---
+
+## Parte 5: Questões extras
+
+### Questão 4 — Um usuário envia 500 imagens e o processamento leva vários minutos
+
+A regra que organiza todo o resto: **nenhuma requisição HTTP fica aberta esperando o
+processamento**. A API aceita o trabalho, devolve um identificador e o cliente acompanha o
+progresso por outro caminho.
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant A as API
+    participant S as GCS
+    participant Q as Fila
+    participant W as Workers
+    participant DB as Postgres
+
+    C->>A: POST /batches (500 imagens)
+    A->>DB: cria lote + 500 predições "queued"
+    A-->>C: 202 Accepted + batch_id + URLs pré-assinadas
+    C->>S: PUT das imagens (direto, em paralelo)
+    C->>A: POST /batches/{id}/submit
+    A->>Q: publica 500 mensagens (uma por imagem)
+    loop Cada worker
+        W->>Q: consome mensagem
+        W->>S: baixa a imagem
+        W->>W: inferência (modelo carregado uma vez)
+        W->>DB: atualiza a predição
+    end
+    C->>A: GET /batches/{id} (progresso)
+    A-->>C: 320/500 concluídas
+```
+
+**Uma mensagem por imagem, não por lote.** Assim as 500 imagens são processadas em
+paralelo por quantos workers existirem, uma falha isolada não derruba o lote inteiro e a
+retentativa reprocessa só o que falhou. O lote vira apenas um agregador de contadores.
+
+**O cliente acompanha por polling ou callback.** `GET /batches/{id}` devolve os contadores
+por status; para volume maior, um webhook ao final ou o WebSocket que o gateway do diagrama
+da Parte 1 já expõe. Polling é o mais simples e resolve a maioria dos casos.
+
+
+### Questão 5 — Upload de uma imagem de 2 GB não deve passar pela API
+
+**A API entrega uma credencial, não recebe bytes.** O cliente pede a permissão de upload, a
+API valida quem ele é e responde com uma URL pré-assinada; o cliente envia o arquivo direto
+para o GCS.
+
+Sempre carregando os seguintes parametros:
+- `content-length-range`, para o cliente não subir um arquivo de 50 GB;
+- `content-type` restrito;
+
+
+### Questão 6 — Como impedir que um usuário baixe imagens de outro cliente
+
+
+1. O tenant vem do token, nunca do request.** Cada imagem, missão e predição guardaria o
+`client_id` do dono. O `client_id` usado nas consultas sai do JWT validado, e o parâmetro
+que o cliente manda serve só para filtrar dentro do que já é dele.
+
+4. Responder 404, não 403.** Para recurso de outro cliente, "não encontrado" evita
+confirmar que o id existe. `403` já é informação para quem está enumerando ids.
+
