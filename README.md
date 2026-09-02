@@ -87,7 +87,7 @@ curl -X POST localhost:8000/missions \
 | `GET` | `/health` | Saúde da API e do banco (pública) |
 | `POST` | `/missions` | Cria uma missão |
 | `GET` | `/missions/{id}` | Busca uma missão pelo id |
-| `PATCH` | `/missions/{id}` | Atualização parcial |
+| `PATCH` | `/missions/{id}` | Edição parcial |
 | `DELETE` | `/missions/{id}` | Remove uma missão |
 
 ### Organização do código
@@ -104,35 +104,6 @@ O fluxo é `api -> service -> repository -> banco` e as dependências apontam pa
 o service depende da interface `IMissionRepository`, que fica no domínio, e é a
 implementação SQL que depende do domínio. O `domain/` não importa nada das outras camadas.
 
-### Decisões técnicas
-
-- **Entidade que se valida.** `Mission` é imutável e carrega a máquina de estados do
-  `status`: de `planned` só se vai para `in_progress` ou `canceled`, e missão encerrada
-  não volta a rodar. A regra fica na entidade para não se perder quando outro caso de uso
-  precisar alterar uma missão.
-- **Interfaces nos services.** Os endpoints dependem de `IMissionService`, nunca da
-  implementação, o que permite trocar a regra ou usar um dublê nos testes sem tocar na rota.
-- **Injeção de dependência.** A cadeia `Database -> Repository -> Service` é montada em
-  `api/dependencies.py` e entregue pronta ao endpoint via `Depends`, sempre tipada pela
-  interface. Trocar implementação é mudança em um arquivo só.
-- **Singleton do driver.** `Database` mantém uma conexão por processo, aberta no lifespan e
-  fechada no shutdown. Só ele conhece o driver concreto; os repositories usam `execute`,
-  `fetch_one` e `fetch_all`.
-- **Repository abstrato.** `AbstractRepository` concentra o CRUD genérico; cada repository
-  declara tabela, colunas e o mapeamento linha ↔ entidade. O mapeamento fica aqui para que
-  o formato do banco (status em texto, `created_at` em ISO 8601) não vaze para o domínio.
-- **JWT em middleware, sem login.** A autenticação acontece em outro microsserviço: aqui o
-  middleware só valida assinatura, expiração e — quando configurados — `iss` e `aud`, e
-  coloca a identidade no request. Como a validação roda antes das rotas, rota nova já nasce
-  protegida: só o que está em `PUBLIC_PATHS` fica de fora, e a identidade chega ao endpoint
-  pela dependência `get_current_user`. Assim esta API não guarda usuários nem senhas.
-- **Erros traduzidos na borda.** As camadas internas levantam erros de domínio e
-  `api/errors.py` faz o de-para para 404, 409 e 422 — nenhuma delas conhece HTTP.
-- **Banco.** A Parte 2 pede SQLite e a Parte 4 pede PostgreSQL. Mantive SQLite aqui e isolei
-  o driver no singleton `Database`, de forma que a migração fique restrita a ele e ao
-  repository.
-
----
 
 ## Parte 3: Integração de modelos de IA
 
@@ -140,9 +111,7 @@ implementação SQL que depende do domínio. O `domain/` não importa nada das o
 modelo já treinado e grava a execução no histórico.
 
 O modelo é um **SSD MobileNet v1** (COCO) em ONNX, versionado em `models/`. A escolha foi
-por peso: ONNX Runtime roda bem em CPU e a imagem Docker fica na casa das centenas de MB,
-enquanto um YOLO via `ultralytics` traria o PyTorch inteiro e passaria de 2 GB. O modelo
-está atrás da interface `IInferenceEngine`, então trocá-lo não toca em service nem em rota.
+por simplicidade: ONNX Runtime roda bem em CPU e a imagem Docker fica na casa das centenas de MB. O modelo está atrás da interface `IInferenceEngine`, então trocá-lo não toca em service nem em rota.
 
 ### Requisição
 
@@ -174,10 +143,7 @@ que abstrai o S3.
 
 **Modelo carregado apenas uma vez.** `OnnxModelRegistry` mantém as sessões em cache por
 versão e é memorizado por processo, então o carregamento acontece uma vez — no lifespan,
-não na primeira requisição. Carregar na subida também faz pesos ausentes derrubarem o
-deploy, em vez de estourarem na cara do usuário. O cache é protegido por lock: duas
-requisições simultâneas pedindo uma versão ainda não carregada não a carregam em
-duplicidade. O teste `test_modelo_carregado_apenas_uma_vez` fixa esse comportamento.
+não na primeira requisição.
 
 **Tratamento de erro.** Cada falha tem um erro de domínio próprio e vira um status
 distinto: imagem inexistente `404`, versão de modelo desconhecida `422`, arquivo que não é
@@ -185,29 +151,103 @@ imagem `422`, falha dentro do runtime `500`. Toda falha é gravada no histórico
 `status=failed` e a mensagem — erro que não deixa registro não é observável.
 
 **Tempo de inferência.** Medido com `perf_counter` em volta **apenas** da chamada ao
-modelo, separado do tempo total da requisição. Os dois campos vão na resposta e no
-histórico; se fossem um só, o número não serviria para diagnosticar se o gargalo é o
-modelo ou a leitura da imagem.
+modelo, separado do tempo total da requisição.
 
 **Versionamento.** `models/manifest.json` declara as versões, o arquivo de cada uma, as
 labels e qual é a ativa. `model_version` vazio na requisição usa a ativa, e a versão
 efetivamente usada é gravada em toda predição — sem isso não há como explicar por que a
-mesma imagem deu resultados diferentes em datas diferentes. Como o registry carrega sob
-demanda e mantém em cache, dá para servir duas versões ao mesmo tempo, o que sustenta
-rollback e comparação sem reiniciar o processo.
+mesma imagem deu resultados diferentes em datas diferentes.
 
 **Histórico das predições.** Tabela `predictions` com a solicitação, o resultado, os tempos
-e o erro. O registro é criado como `running` **antes** da inferência e atualizado no fim,
-para que uma queda do processo no meio do caminho deixe rastro em vez de sumir.
-
-Além disso, `request_id` funciona como chave de idempotência: repetir a mesma requisição
-devolve a predição anterior em vez de gastar CPU processando de novo — o que importa quando
-o cliente faz retry.
+e o erro. 
 
 ### Limite conhecido
 
 A inferência roda em `asyncio.to_thread`, porque é CPU-bound e travaria o event loop se
-rodasse direto na rota. Isso resolve o bloqueio, mas não o enfileiramento: com muitas
-requisições simultâneas, o threadpool satura e a latência cresce. A solução real é tirar o
+rodasse direto na rota. A solução real é tirar o
 processamento da API e passá-lo para um worker consumindo fila — que é exatamente o desenho
 descrito nas respostas das Questões 3 e 4.
+
+---
+
+## Parte 4: Docker e orquestração de contêineres
+
+```bash
+cp .env.example .env
+docker compose up --build     # API em http://localhost:8000
+```
+
+O compose sobe três serviços: **api**, **postgres** e **redis**.
+
+### O que foi feito
+
+**Containerização.** Base `python:3.13-slim-trixie` (Debian 13) e `Dockerfile` em dois estágios: o primeiro resolve as dependências com
+`uv sync --frozen`, o segundo recebe apenas o virtualenv e o código. As dependências ficam
+em uma camada própria, antes do `COPY` do código, então mudar um arquivo Python não refaz a
+instalação. O processo roda como usuário `app`, sem privilégios.
+
+**Event loop.** O container sobe com `--loop uvloop --http httptools`. O `uvicorn[standard]`
+já traz os dois e o padrão `--loop auto` os escolheria sozinho; declarar explicitamente evita
+cair no asyncio puro em silêncio se o extra deixar de ser instalado. O log da subida informa
+qual loop está em uso.
+
+**Variáveis de ambiente.** Toda configuração vem do ambiente, via `Settings` do
+pydantic-settings — nada de host, senha ou segredo no código. O compose usa
+`${VAR:-default}`, de modo que `docker compose up` funciona sem `.env`, mas qualquer valor
+pode ser sobrescrito.
+
+**Healthcheck.** `/health` verifica banco e cache de verdade, e é o que o `HEALTHCHECK` do
+Dockerfile e o do compose consultam. Um container que responde mas perdeu o banco aparece
+como `unhealthy`, que é o comportamento que um orquestrador precisa para substituir a
+réplica.
+
+**Esperar o banco.** Duas camadas. No compose, `depends_on: condition: service_healthy`
+segura a API até o `pg_isready` do Postgres passar. Na aplicação, `connect_with_retry`
+tenta conectar por até 30 vezes com intervalo de 1s — isso cobre o caso de o banco reiniciar
+depois da subida, quando o orquestrador não tem mais nada a segurar.
+
+**PostgreSQL.** O driver virou um contrato (`Database`) com duas implementações:
+`SQLiteDatabase` e `PostgresDatabase`, esta última com pool de conexões do asyncpg. Os
+repositories continuam escrevendo o mesmo SQL — a tradução dos placeholders `?` para o `$n`
+do asyncpg fica dentro do driver. É a promessa da Parte 2 sendo cobrada: trocar de banco
+não tocou em service nem em domínio.
+
+### Por que utilizar Redis neste cenário?
+
+1) Cache distribuido garantindo idempotência entre replicas. E para controle de uso da api distribuido, como um semafaro ou mutex entre as replicas. 
+2) A implementação do Redis Queue para desacoplar a inferência do modelo de ML da API.
+3) Cache de leitura dos dados das predições.
+
+
+### Como escalaria a aplicação para processar milhares de imagens simultaneamente?
+
+Construindo uma API que recebe as requsições de processamento, mas não processa diretamente. Publica as requisições de processamento em um fila, onde um pool de workers (doployments k8s) consomem a fila e realizam a inferência. Idealmente esse pool de workers seria escalável a partir de métricas da propria fila, utilizando KEDA por exemplo. 
+
+
+### Como faria o deploy em AWS?
+
+Resposta de deploy na GCP:
+
+Setup de um GKE para deployment das images e replicas.
+Com um script de CD no google cloud build, que faz o build da imagem, salva no artifact registry e commita a troca da imagem no deployment yaml do servico.
+O banco de dados fica fora do K8S numa instância do Cloud SQL (Postgres na GCP).
+O redis vira um pod dentro da node pool.
+As imagens dos processamentos seriam guardadas no GCS (bucket).
+Os segredos da aplicação ficam guardados no secret manager e injetados via env-var no deploy.
+
+
+### Como desacoplaria o processamento pesado da API?
+
+`POST /predictions` deixaria de executar a inferência diretamente. Ele passaria a validar os parâmetros,
+escrever os jobs de inferência numa fila e retornar o status como `queued`,  **202 Accepted** com o id.
+O cliente passa a acompanhar por um novo endpoint o satatus do processamento `GET /predictions/{id}`, ou por websocket/SSE.
+
+Do outro lado, um worker consome a fila, carrega o modelo uma vez, roda a inferência e
+atualiza o mesmo registro de histórico. As garantias vêm da fila: retentativa com backoff,
+DLQ para o que falha de forma persistente e visibility timeout para que uma mensagem em
+processamento não seja entregue duas vezes — apoiada pela idempotência por `request_id` que
+já existe.
+
+No código atual, isso é uma implementação nova de `IPredictionService`: a rota, os schemas
+e o repositório de histórico continuam iguais, porque a interface não muda. O que muda é
+quem executa a inferência, e quando.
