@@ -50,3 +50,9 @@ class PredictionNotFoundError(DomainError):
     def __init__(self, prediction_id: str) -> None:
         super().__init__(f"Predição {prediction_id} não encontrada")
         self.prediction_id = prediction_id
+
+
+class PredictionInProgressError(DomainError):
+    def __init__(self, request_id: str) -> None:
+        super().__init__(f"A requisição '{request_id}' já está sendo processada")
+        self.request_id = request_id

@@ -4,8 +4,6 @@ import json
 from datetime import datetime
 from typing import Any, Sequence
 
-import aiosqlite
-
 from src.domain.prediction import (
     BoundingBox,
     Detection,
@@ -14,6 +12,7 @@ from src.domain.prediction import (
 )
 from src.domain.repositories import IPredictionRepository
 from src.repository.base import AbstractRepository
+from src.repository.database import Row
 
 
 class PredictionRepository(AbstractRepository[Prediction], IPredictionRepository):
@@ -74,7 +73,7 @@ class PredictionRepository(AbstractRepository[Prediction], IPredictionRepository
             "created_by": entity.created_by,
         }
 
-    def to_domain(self, row: aiosqlite.Row) -> Prediction:
+    def to_domain(self, row: Row) -> Prediction:
         detections = tuple(
             Detection(
                 label=item["label"],

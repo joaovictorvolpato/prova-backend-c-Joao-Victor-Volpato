@@ -8,9 +8,7 @@ comandos em cada repository concreto.
 from abc import ABC, abstractmethod
 from typing import Any, Generic, Sequence, TypeVar
 
-import aiosqlite
-
-from src.repository.database import Database
+from src.repository.database import Database, Row
 
 T = TypeVar("T")
 
@@ -36,7 +34,7 @@ class AbstractRepository(ABC, Generic[T]):
         """Converte a entidade de domínio em colunas do banco."""
 
     @abstractmethod
-    def to_domain(self, row: aiosqlite.Row) -> T:
+    def to_domain(self, row: Row) -> T:
         """Converte uma linha do banco na entidade de domínio."""
 
     async def create(self, entity: T) -> T:

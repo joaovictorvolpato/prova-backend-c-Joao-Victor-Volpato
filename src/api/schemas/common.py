@@ -10,3 +10,4 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     database: str
+    cache: str

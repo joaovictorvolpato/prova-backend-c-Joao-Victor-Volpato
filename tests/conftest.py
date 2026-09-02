@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from src.config import Settings
 from src.main import create_app
-from src.repository.database import Database
+from src.repository.database import reset_database
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def images_root(tmp_path):
 @pytest.fixture
 def settings(tmp_path, images_root) -> Settings:
     return Settings(
-        database_url=str(tmp_path / "test.db"),
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
         jwt_secret="test-secret",
         images_root=str(images_root),
         # Manifesto real: o registry é memorizado, então o modelo carrega uma
@@ -45,10 +45,10 @@ def image_key(images_root) -> str:
 @pytest.fixture
 def client(settings: Settings):
     # O singleton é reiniciado para não vazar conexão entre testes.
-    Database.reset()
+    reset_database()
     with TestClient(create_app(settings)) as test_client:
         yield test_client
-    Database.reset()
+    reset_database()
 
 
 @pytest.fixture

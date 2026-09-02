@@ -3,11 +3,10 @@
 from datetime import datetime
 from typing import Any, Sequence
 
-import aiosqlite
-
 from src.domain.mission import Mission, MissionStatus
 from src.domain.repositories import IMissionRepository
 from src.repository.base import AbstractRepository
+from src.repository.database import Row
 
 
 class MissionRepository(AbstractRepository[Mission], IMissionRepository):
@@ -44,7 +43,7 @@ class MissionRepository(AbstractRepository[Mission], IMissionRepository):
             "area_hectares": entity.area_hectares,
         }
 
-    def to_domain(self, row: aiosqlite.Row) -> Mission:
+    def to_domain(self, row: Row) -> Mission:
         return Mission(
             id=row["id"],
             name=row["name"],

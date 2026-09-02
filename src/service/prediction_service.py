@@ -7,7 +7,13 @@ toda execução — inclusive a que falha — vira um registro.
 import asyncio
 from time import perf_counter
 
-from src.domain.exceptions import DomainError, ImageNotFoundError, PredictionNotFoundError
+from src.domain.cache import ICache
+from src.domain.exceptions import (
+    DomainError,
+    ImageNotFoundError,
+    PredictionInProgressError,
+    PredictionNotFoundError,
+)
 from src.domain.inference import IModelRegistry
 from src.domain.prediction import InferenceParams, Prediction
 from src.domain.repositories import IPredictionRepository
@@ -22,11 +28,15 @@ class PredictionService(IPredictionService):
         registry: IModelRegistry,
         storage: IImageStorage,
         mission_service: IMissionService,
+        cache: ICache,
+        idempotency_ttl_seconds: int = 300,
     ) -> None:
         self._repository = repository
         self._registry = registry
         self._storage = storage
         self._mission_service = mission_service
+        self._cache = cache
+        self._idempotency_ttl = idempotency_ttl_seconds
 
     async def predict(
         self,
@@ -40,11 +50,16 @@ class PredictionService(IPredictionService):
     ) -> Prediction:
         started = perf_counter()
 
-        # Idempotência: o mesmo request_id não reprocessa a imagem.
+        # Idempotência: o mesmo request_id não reprocessa a imagem. O registro
+        # cobre o que já terminou; o lock no Redis cobre o que ainda está em
+        # andamento, inclusive em outra réplica da API.
+        lock_key = f"prediction:{request_id}" if request_id else None
         if request_id:
             existing = await self._repository.get_by_request_id(request_id)
             if existing is not None:
                 return existing
+            if not await self._cache.acquire(lock_key, self._idempotency_ttl):
+                raise PredictionInProgressError(request_id)
 
         # Validações que dependem de estado, antes de gastar CPU com o modelo.
         if not await self._storage.exists(image_key):
@@ -73,6 +88,9 @@ class PredictionService(IPredictionService):
             failed = prediction.failed(str(error), total_ms=self._elapsed(started))
             await self._repository.update(failed)
             raise
+        finally:
+            if lock_key:
+                await self._cache.release(lock_key)
 
         succeeded = prediction.succeeded(
             detections, inference_ms=inference_ms, total_ms=self._elapsed(started)
