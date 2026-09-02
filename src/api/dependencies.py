@@ -5,17 +5,24 @@ endpoints, sempre tipada pelas interfaces. Trocar a implementação (outro banco
 outra regra) é uma mudança só neste arquivo.
 """
 
+from functools import lru_cache
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 
 from src.api.schemas.auth import AuthenticatedUser
 from src.config import Settings, get_settings
-from src.domain.repositories import IMissionRepository
+from src.domain.inference import IModelRegistry
+from src.domain.repositories import IMissionRepository, IPredictionRepository
+from src.domain.storage import IImageStorage
+from src.infra.onnx_engine import OnnxModelRegistry
 from src.repository.database import Database
 from src.repository.mission_repository import MissionRepository
-from src.service.interfaces import IMissionService, ITokenService
+from src.repository.prediction_repository import PredictionRepository
+from src.repository.storage import LocalImageStorage
+from src.service.interfaces import IMissionService, IPredictionService, ITokenService
 from src.service.mission_service import MissionService
+from src.service.prediction_service import PredictionService
 from src.service.token_service import TokenService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -33,6 +40,24 @@ def get_mission_repository(database: DatabaseDep) -> IMissionRepository:
     return MissionRepository(database)
 
 
+@lru_cache
+def get_model_registry_for(manifest_path: str) -> IModelRegistry:
+    """Registry por manifesto, memorizado: o modelo carrega uma vez por processo."""
+    return OnnxModelRegistry(manifest_path)
+
+
+def get_model_registry(settings: SettingsDep) -> IModelRegistry:
+    return get_model_registry_for(settings.models_manifest)
+
+
+def get_image_storage(settings: SettingsDep) -> IImageStorage:
+    return LocalImageStorage(settings.images_root)
+
+
+def get_prediction_repository(database: DatabaseDep) -> IPredictionRepository:
+    return PredictionRepository(database)
+
+
 def get_mission_service(
     repository: Annotated[IMissionRepository, Depends(get_mission_repository)],
 ) -> IMissionService:
@@ -44,6 +69,18 @@ def get_token_service(settings: SettingsDep) -> ITokenService:
 
 
 MissionServiceDep = Annotated[IMissionService, Depends(get_mission_service)]
+
+
+def get_prediction_service(
+    repository: Annotated[IPredictionRepository, Depends(get_prediction_repository)],
+    registry: Annotated[IModelRegistry, Depends(get_model_registry)],
+    storage: Annotated[IImageStorage, Depends(get_image_storage)],
+    mission_service: MissionServiceDep,
+) -> IPredictionService:
+    return PredictionService(repository, registry, storage, mission_service)
+
+
+PredictionServiceDep = Annotated[IPredictionService, Depends(get_prediction_service)]
 TokenServiceDep = Annotated[ITokenService, Depends(get_token_service)]
 
 

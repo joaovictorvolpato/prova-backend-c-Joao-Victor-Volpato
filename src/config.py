@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     app_name: str = "Drone Missions API"
     database_url: str = "data/missions.db"
 
+    # Modelos de IA e origem das imagens processadas
+    models_manifest: str = "models/manifest.json"
+    images_root: str = "data/images"
+
     # O token é emitido por outro microsserviço; aqui só validamos a assinatura.
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"

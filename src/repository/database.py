@@ -21,6 +21,23 @@ CREATE TABLE IF NOT EXISTS missions (
 
 CREATE INDEX IF NOT EXISTS idx_missions_status ON missions (status);
 
+CREATE TABLE IF NOT EXISTS predictions (
+    id            TEXT PRIMARY KEY,
+    request_id    TEXT UNIQUE,
+    mission_id    TEXT,
+    image_key     TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    detections    TEXT NOT NULL DEFAULT '[]',
+    inference_ms  REAL,
+    total_ms      REAL,
+    error         TEXT,
+    created_at    TEXT NOT NULL,
+    created_by    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_mission ON predictions (mission_id);
+
 """
 
 

@@ -5,9 +5,10 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
+from src.api.dependencies import get_model_registry_for
 from src.api.errors import register_exception_handlers
 from src.api.middleware.jwt_auth import JWTAuthMiddleware
-from src.api.routes import auth, health, missions
+from src.api.routes import auth, health, missions, predictions
 from src.config import Settings, get_settings
 from src.repository.database import Database
 from src.service.token_service import TokenService
@@ -32,6 +33,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Conexão aberta uma vez na subida e fechada no shutdown.
         database = Database(settings.database_url)
         await database.connect()
+        # Carrega a versão ativa do modelo já na subida: a primeira requisição
+        # não paga o carregamento, e pesos ausentes derrubam o deploy aqui, e
+        # não na cara do usuário.
+        get_model_registry_for(settings.models_manifest).get()
         try:
             yield
         finally:
@@ -62,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(missions.router)
+    app.include_router(predictions.router)
 
     return app
 

@@ -131,3 +131,83 @@ implementação SQL que depende do domínio. O `domain/` não importa nada das o
 - **Banco.** A Parte 2 pede SQLite e a Parte 4 pede PostgreSQL. Mantive SQLite aqui e isolei
   o driver no singleton `Database`, de forma que a migração fique restrita a ele e ao
   repository.
+
+---
+
+## Parte 3: Integração de modelos de IA
+
+`POST /predictions` recebe a solicitação, valida os parâmetros, roda a inferência com um
+modelo já treinado e grava a execução no histórico.
+
+O modelo é um **SSD MobileNet v1** (COCO) em ONNX, versionado em `models/`. A escolha foi
+por peso: ONNX Runtime roda bem em CPU e a imagem Docker fica na casa das centenas de MB,
+enquanto um YOLO via `ultralytics` traria o PyTorch inteiro e passaria de 2 GB. O modelo
+está atrás da interface `IInferenceEngine`, então trocá-lo não toca em service nem em rota.
+
+### Requisição
+
+```bash
+curl -X POST localhost:8000/predictions \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+        "image_key": "missao-12/frame-0001.png",
+        "mission_id": "…",
+        "model_version": null,
+        "confidence_threshold": 0.25,
+        "request_id": "req-123"
+      }'
+```
+
+A imagem é referenciada por **chave**, não enviada no corpo: é o mesmo desenho da Questão 5,
+em que o arquivo vai direto para o storage e a API recebe só o ponteiro. As imagens ficam em
+`IMAGES_ROOT` (`data/images` por padrão); em produção, esse adaptador seria o microsserviço
+que abstrai o S3.
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/predictions` | Processa uma imagem |
+| `GET` | `/predictions` | Histórico, com filtro por `mission_id` |
+| `GET` | `/predictions/{id}` | Uma execução específica |
+| `GET` | `/models` | Versões disponíveis e a ativa |
+
+### Como cada requisito foi atendido
+
+**Modelo carregado apenas uma vez.** `OnnxModelRegistry` mantém as sessões em cache por
+versão e é memorizado por processo, então o carregamento acontece uma vez — no lifespan,
+não na primeira requisição. Carregar na subida também faz pesos ausentes derrubarem o
+deploy, em vez de estourarem na cara do usuário. O cache é protegido por lock: duas
+requisições simultâneas pedindo uma versão ainda não carregada não a carregam em
+duplicidade. O teste `test_modelo_carregado_apenas_uma_vez` fixa esse comportamento.
+
+**Tratamento de erro.** Cada falha tem um erro de domínio próprio e vira um status
+distinto: imagem inexistente `404`, versão de modelo desconhecida `422`, arquivo que não é
+imagem `422`, falha dentro do runtime `500`. Toda falha é gravada no histórico com
+`status=failed` e a mensagem — erro que não deixa registro não é observável.
+
+**Tempo de inferência.** Medido com `perf_counter` em volta **apenas** da chamada ao
+modelo, separado do tempo total da requisição. Os dois campos vão na resposta e no
+histórico; se fossem um só, o número não serviria para diagnosticar se o gargalo é o
+modelo ou a leitura da imagem.
+
+**Versionamento.** `models/manifest.json` declara as versões, o arquivo de cada uma, as
+labels e qual é a ativa. `model_version` vazio na requisição usa a ativa, e a versão
+efetivamente usada é gravada em toda predição — sem isso não há como explicar por que a
+mesma imagem deu resultados diferentes em datas diferentes. Como o registry carrega sob
+demanda e mantém em cache, dá para servir duas versões ao mesmo tempo, o que sustenta
+rollback e comparação sem reiniciar o processo.
+
+**Histórico das predições.** Tabela `predictions` com a solicitação, o resultado, os tempos
+e o erro. O registro é criado como `running` **antes** da inferência e atualizado no fim,
+para que uma queda do processo no meio do caminho deixe rastro em vez de sumir.
+
+Além disso, `request_id` funciona como chave de idempotência: repetir a mesma requisição
+devolve a predição anterior em vez de gastar CPU processando de novo — o que importa quando
+o cliente faz retry.
+
+### Limite conhecido
+
+A inferência roda em `asyncio.to_thread`, porque é CPU-bound e travaria o event loop se
+rodasse direto na rota. Isso resolve o bloqueio, mas não o enfileiramento: com muitas
+requisições simultâneas, o threadpool satura e a latência cresce. A solução real é tirar o
+processamento da API e passá-lo para um worker consumindo fila — que é exatamente o desenho
+descrito nas respostas das Questões 3 e 4.
